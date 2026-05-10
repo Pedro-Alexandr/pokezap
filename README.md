@@ -81,12 +81,12 @@ Escaneie-o com o WhatsApp do número que será o bot:
 
 | Raridade | Cor | Chance de Encontro |
 |---|---|---|
-| Comum ⚪ | — | ~50% |
-| Incomum 🟢 | — | ~30% |
-| Raro 🔵 | — | ~15% |
-| Épico 🟣 | — | ~4% |
-| Lendário 🟡 | — | ~0.8% |
-| Mítico 🔴 | — | ~0.2% |
+| Comum  | ⚪ | ~50% |
+| Incomum  | 🟢 | ~30% |
+| Raro  | 🔵 | ~15% |
+| Épico  | 🟣 | ~4% |
+| Lendário  | 🟡 | ~0.8% |
+| Mítico  | 🔴 | ~0.2% |
 
 ---
 
