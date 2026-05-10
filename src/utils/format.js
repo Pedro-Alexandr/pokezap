@@ -1,55 +1,70 @@
+// ═══════════════════════════════════════════════
+//  FORMAT UTILITIES
+// ═══════════════════════════════════════════════
+
+/**
+ * Barra de HP visual.
+ */
 function hpBar(current, max, size = 10) {
-  const ratio = Math.max(0, Math.min(1, current / max));
+  const ratio  = Math.max(0, Math.min(1, current / Math.max(1, max)));
   const filled = Math.round(ratio * size);
-  const bar = '█'.repeat(filled) + '░'.repeat(size - filled);
-  const percent = Math.round(ratio * 100);
-  return `[${bar}] ${current}/${max} (${percent}%)`;
+  return `[${'█'.repeat(filled)}${'░'.repeat(size - filled)}] ${current}/${max}`;
 }
 
+/**
+ * Emoji de raridade.
+ */
 function rarityEmoji(rarity) {
-  const map = { comum: '⚪', incomum: '🟢', raro: '🔵', épico: '🟣', lendário: '🟡', mítico: '🔴' };
+  const map = {
+    comum:    '⚪',
+    incomum:  '🟢',
+    raro:     '🔵',
+    épico:    '🟣',
+    lendário: '🟡',
+    mítico:   '🔴',
+  };
   return map[rarity] || '⚪';
 }
 
-function formatTrainerStatus(trainer, pokemon) {
-  const lvlBar = `Nível ${trainer.level} (${trainer.xp} XP / ${trainer.level * 150} XP)`;
+/**
+ * Capitaliza a primeira letra.
+ */
+function capitalize(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Formata o status do treinador.
+ */
+function formatTrainerStatus(trainer, activePoke) {
   let msg = `╔══ 🎮 TREINADOR ══╗\n`;
-  msg += `👤 ${trainer.name}\n`;
-  msg += `📍 Região: ${capitalize(trainer.region)}\n`;
-  msg += `⭐ ${lvlBar}\n`;
-  msg += `🏆 Vitórias: ${trainer.wins} | Derrotas: ${trainer.losses}\n`;
-  msg += `💰 Moedas: ${trainer.coins}\n`;
-  msg += `🎒 Pokéballs: ${trainer.pokeballs} | Great: ${trainer.great_balls} | Ultra: ${trainer.ultra_balls}\n`;
-  if (pokemon) {
-    msg += `\n⚔️ Pokémon Ativo:\n`;
-    msg += `${pokemon.emoji || '🔴'} ${pokemon.name} Lv.${pokemon.level}\n`;
-    msg += `❤️ ${hpBar(pokemon.hp, pokemon.max_hp)}\n`;
+  msg += `👤 *${trainer.name}*  |  📍 ${capitalize(trainer.region)}\n`;
+  msg += `⭐ Nível ${trainer.level} — ${trainer.xp}/${trainer.level * 150} XP\n`;
+  msg += `🏆 ${trainer.wins}V/${trainer.losses}D  |  🏅 ${trainer.pvp_rating || 1000} ELO\n`;
+  msg += `💰 ${trainer.coins} moedas  |  🔴${trainer.pokeballs} 🔵${trainer.great_balls} ⚫${trainer.ultra_balls}\n`;
+
+  if (activePoke) {
+    msg += `\n⚔️ Ativo: ${activePoke.emoji || '🔴'} ${activePoke.name} Lv.${activePoke.level}\n`;
+    msg += `❤️ ${hpBar(activePoke.hp, activePoke.max_hp)}`;
   }
+
   return msg;
 }
 
-function formatPokemonInfo(p) {
-  const types = (p.type || []).join(' / ');
-  return (
-    `${p.emoji || '🔴'} *${p.name}* (Lv.${p.level})\n` +
-    `🏷️ Tipo: ${types}\n` +
-    `❤️ HP: ${hpBar(p.hp, p.max_hp)}\n` +
-    `⚔️ Atk: ${p.attack} | 🛡️ Def: ${p.defense} | 💨 Vel: ${p.speed}`
-  );
+/**
+ * Formata a lista de Pokémon da mochila.
+ */
+function formatCollection(list) {
+  return list.map((p, i) => {
+    const typeStr = (() => {
+      try {
+        const t = typeof p.type === 'string' ? JSON.parse(p.type) : p.type;
+        return Array.isArray(t) ? t.join('/') : String(t);
+      } catch { return '?'; }
+    })();
+    return `${i + 1}. ${p.emoji || '🔴'} *${p.name}* Lv.${p.level}  ❤️${p.hp}/${p.max_hp}  [${typeStr}]${p.is_active ? ' ◄ ATIVO' : ''}`;
+  }).join('\n');
 }
 
-function capitalize(str) {
-  return str ? str.charAt(0).toUpperCase() + str.slice(1) : '';
-}
-
-function formatCollection(pokemonList) {
-  if (!pokemonList.length) return '📦 Sua mochila está vazia!';
-  return pokemonList
-    .map((p, i) => {
-      const active = p.is_active ? ' ◄ ATIVO' : '';
-      return `${i + 1}. ${p.name} Lv.${p.level}${active}`;
-    })
-    .join('\n');
-}
-
-module.exports = { hpBar, rarityEmoji, formatTrainerStatus, formatPokemonInfo, capitalize, formatCollection };
+module.exports = { hpBar, rarityEmoji, capitalize, formatTrainerStatus, formatCollection };

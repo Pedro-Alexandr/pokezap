@@ -1,34 +1,42 @@
-// Gerencia encontros selvagens ativos (em memória)
-// Estrutura: Map<trainerId, { pokemon, attempts }>
+// ═══════════════════════════════════════════════
+//  ENCOUNTER MANAGER — Batalhas selvagens em memória
+// ═══════════════════════════════════════════════
 
 const encounters = new Map();
 
+/**
+ * Registra um encontro com Pokémon selvagem.
+ * @param {string} trainerId
+ * @param {object} pokemon - Pokémon selvagem com todos os atributos
+ */
 function setEncounter(trainerId, pokemon) {
-  encounters.set(trainerId, { pokemon: { ...pokemon, max_hp: pokemon.hp }, attempts: 0 });
+  encounters.set(trainerId, {
+    pokemon: { ...pokemon, max_hp: pokemon.hp },
+  });
 }
 
+/**
+ * Retorna o encontro ativo de um treinador.
+ * @param {string} trainerId
+ * @returns {object|null}
+ */
 function getEncounter(trainerId) {
   return encounters.get(trainerId) || null;
 }
 
-function updateEncounterHp(trainerId, newHp) {
+/**
+ * Atualiza o HP do Pokémon selvagem no encontro.
+ */
+function updateEncounterHp(trainerId, hp) {
   const enc = encounters.get(trainerId);
-  if (enc) enc.pokemon.hp = newHp;
+  if (enc) enc.pokemon.hp = hp;
 }
 
-function incrementAttempts(trainerId) {
-  const enc = encounters.get(trainerId);
-  if (enc) enc.attempts += 1;
-}
-
+/**
+ * Remove o encontro ativo.
+ */
 function clearEncounter(trainerId) {
   encounters.delete(trainerId);
 }
 
-module.exports = {
-  setEncounter,
-  getEncounter,
-  updateEncounterHp,
-  incrementAttempts,
-  clearEncounter,
-};
+module.exports = { setEncounter, getEncounter, updateEncounterHp, clearEncounter };

@@ -2,7 +2,7 @@ const { startBot } = require('./bot');
 const { initDatabase } = require('./database/db');
 
 async function main() {
-  console.log('🎮 Iniciando Pokémon WhatsApp RPG Bot...');
+  console.log('🎮 Iniciando Pokézap Bot...');
   initDatabase();
   await startBot();
 }
