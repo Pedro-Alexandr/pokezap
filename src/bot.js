@@ -10,9 +10,13 @@ const { handleCommand } = require('./commands');
 const { createSticker } = require('./utils/sticker');
 
 async function startBot() {
-  const AUTH_PATH = process.env.NODE_ENV === 'production'
-    ? '/data/auth_info'
-    : 'auth_info';
+  const path = require('path');
+  const AUTH_PATH = path.join(__dirname, '../auth_info');
+  const fs = require('fs');
+
+  if (!fs.existsSync(AUTH_PATH)) {
+    fs.mkdirSync(AUTH_PATH, { recursive: true });
+  }
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
   const { version } = await fetchLatestBaileysVersion();
 
