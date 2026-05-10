@@ -10,7 +10,10 @@ const { handleCommand } = require('./commands');
 const { createSticker } = require('./utils/sticker');
 
 async function startBot() {
-  const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+  const AUTH_PATH = process.env.NODE_ENV === 'production'
+    ? '/data/auth_info'
+    : 'auth_info';
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_PATH);
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -44,9 +47,9 @@ async function startBot() {
     for (const msg of messages) {
       if (msg.key.fromMe || !msg.message) continue;
 
-      const from   = msg.key.remoteJid;
+      const from = msg.key.remoteJid;
       const isGroup = from.endsWith('@g.us');
-      const sender  = isGroup ? msg.key.participant : from;
+      const sender = isGroup ? msg.key.participant : from;
 
       const text =
         msg.message.conversation ||

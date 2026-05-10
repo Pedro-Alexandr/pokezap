@@ -2,7 +2,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, '../../data/game.db');
+const DB_PATH = process.env.NODE_ENV === 'production'
+  ? '/data/game.db'
+  : path.join(__dirname, '../../data/game.db');
 let db;
 
 // ── Missões padrão para seed ──────────────────────────────
