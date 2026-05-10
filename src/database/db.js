@@ -4,7 +4,7 @@ const fs = require('fs');
 
 const DB_PATH = process.env.NODE_ENV === 'production'
   ? '/data/game.db'
-  : path.join(__dirname, '../../data/game.db');
+  : path.join(__dirname, '../../data');
 let db;
 
 // ── Missões padrão para seed ──────────────────────────────
