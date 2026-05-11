@@ -865,9 +865,9 @@ function cmdHelp() {
     `!pedras — Pedras evolutivas\n\n` +
 
     `*🖼️ FIGURINHAS*\n` +
-    `*/s* — Figurinha quadrada\n` +
-    `*/s 2* — Aspecto original\n` +
-    `_Envie ou responda uma mídia com /s_`
+    `*/f* — Figurinha quadrada\n` +
+    `*/f 2* — Aspecto original\n` +
+    `_Envie ou responda uma mídia com /f_`
   );
 }
 

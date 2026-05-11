@@ -88,8 +88,8 @@ async function startBot() {
       const trimmed = text.trim();
 
       // Figurinhas
-      if (trimmed === '/s' || trimmed === '/s 2') {
-        const keepAspect = trimmed === '/s 2';
+      if (trimmed === '/f' || trimmed === '/f 2') {
+        const keepAspect = trimmed === '/f 2';
         try {
           await sock.sendMessage(from, { react: { text: '⏳', key: msg.key } });
           const result = await createSticker(sock, msg, keepAspect);
