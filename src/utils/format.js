@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════
 
 /**
- * Barra de HP visual.
+ * Barra de HP visual..
  */
 function hpBar(current, max, size = 10) {
   const ratio  = Math.max(0, Math.min(1, current / Math.max(1, max)));
