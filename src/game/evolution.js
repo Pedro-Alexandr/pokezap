@@ -112,7 +112,7 @@ function canEvolveByHappiness(pokemon) {
 }
 
 /**
- * Retorna as informações de evolução de um Pokémon pelo ID base.
+ * Retorna as informações de evolução de um Pokémon pelo ID base..
  * @param {number} pokemonId
  * @returns {object|null}
  */
