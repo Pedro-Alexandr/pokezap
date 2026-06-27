@@ -1,10 +1,14 @@
 // ═══════════════════════════════════════════════════════════
 //  STICKER PROCESSOR
-//  Requer (instalar separadamente):
-//    npm install sharp fluent-ffmpeg @ffmpeg-installer/ffmpeg
 //
-//  /f   → figurinha 1:1
-//  /f 2 → figurinha mantendo aspecto original
+//  /s   → AMASSA a imagem/vídeo inteiro para caber em 512×512
+//         (distorce a proporção, mas mostra o conteúdo completo,
+//          sem cortar nada)
+//  /s 2 → mantém a proporção ORIGINAL, com fundo transparente
+//         preenchendo o espaço restante (sem distorcer, sem cortar)
+//
+//  Dependências (já no package.json): sharp, fluent-ffmpeg,
+//  @ffmpeg-installer/ffmpeg
 // ═══════════════════════════════════════════════════════════
 
 const path = require('path');
@@ -15,7 +19,7 @@ const MIN_VIDEO_DURATION = 3;
 const MAX_VIDEO_DURATION = 8;
 const STICKER_SIZE       = 512;
 
-// ── Carregamento gracioso das dependências opcionais ──────
+// ── Carregamento das dependências (com fallback gracioso) ──
 let sharp, ffmpeg, ffmpegPath;
 try {
   sharp = require('sharp');
@@ -29,14 +33,14 @@ try {
 
 // ── Mensagens de erro ─────────────────────────────────────
 const ERRORS = {
-  NO_MEDIA:        '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.',
+  NO_MEDIA:        '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */s*.',
   UNSUPPORTED:     '❌ Tipo de mídia não suportado.\nEnvie uma *foto*, *vídeo* ou *GIF*.',
   VIDEO_TOO_SHORT: `❌ O vídeo é muito curto!\nMínimo: *${MIN_VIDEO_DURATION} segundos*.`,
   VIDEO_TOO_LONG:  `❌ O vídeo é muito longo!\nMáximo: *${MAX_VIDEO_DURATION} segundos*.`,
   PROCESS_FAIL:    '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
-  STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */f 2*.',
-  NO_SHARP:        '❌ Módulo *sharp* não instalado.\nRode: `npm install sharp` no servidor.',
-  NO_FFMPEG:       '❌ Módulo *ffmpeg* não instalado.\nRode: `npm install fluent-ffmpeg @ffmpeg-installer/ffmpeg`',
+  STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */s*.',
+  NO_SHARP:        '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
+  NO_FFMPEG:       '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg" e "@ffmpeg-installer/ffmpeg" ao package.json e refaça o deploy.',
 };
 
 function getTempPath(ext) {
@@ -44,21 +48,29 @@ function getTempPath(ext) {
   return path.join(os.tmpdir(), name);
 }
 
+// ── Processar imagem → WebP ───────────────────────────────
 async function processImage(buffer, keepAspect) {
   if (!sharp) return { error: ERRORS.NO_SHARP };
+
   try {
     let pipeline = sharp(buffer);
+
     if (keepAspect) {
+      // /s 2 → mantém a proporção original, preenchendo o restante
+      // com fundo transparente (NÃO corta, NÃO distorce)
       pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
         fit: 'contain',
         background: { r: 0, g: 0, b: 0, alpha: 0 },
       });
     } else {
+      // /s → AMASSA a imagem inteira para caber exatamente em 512×512,
+      // ignorando a proporção original (distorce, mas mostra tudo,
+      // sem cortar nenhuma parte)
       pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
-        fit: 'cover',
-        position: 'centre',
+        fit: 'fill',
       });
     }
+
     const buf = await pipeline.webp({ quality: 80, lossless: false }).toBuffer();
     return { buffer: buf, animated: false };
   } catch (err) {
@@ -77,6 +89,7 @@ function getVideoDuration(inputPath) {
   });
 }
 
+// ── Processar vídeo/GIF → WebP animado ───────────────────
 async function processVideo(buffer, mimeType, keepAspect) {
   if (!ffmpeg) return { error: ERRORS.NO_FFMPEG };
 
@@ -91,9 +104,13 @@ async function processVideo(buffer, mimeType, keepAspect) {
     if (duration < MIN_VIDEO_DURATION) throw new Error('VIDEO_TOO_SHORT');
     if (duration > MAX_VIDEO_DURATION) throw new Error('VIDEO_TOO_LONG');
 
+    // Filtro de escala:
+    //  - keepAspect (/s 2): mantém proporção + padding transparente
+    //  - padrão (/s): AMASSA — estica exatamente para 512×512,
+    //    ignorando a proporção original, sem cortar nada
     const scaleFilter = keepAspect
       ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
-      : `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=increase,crop=${STICKER_SIZE}:${STICKER_SIZE}`;
+      : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
 
     await new Promise((resolve, reject) => {
       ffmpeg(input)
@@ -142,7 +159,7 @@ function getMediaInfo(msg) {
 
 async function createSticker(sock, msg, keepAspect = false) {
   const info = getMediaInfo(msg);
-  if (!info)                 return { error: ERRORS.NO_MEDIA };
+  if (!info)                   return { error: ERRORS.NO_MEDIA };
   if (info.type === 'sticker') return { error: ERRORS.STICKER_INPUT };
   if (info.type !== 'image' && info.type !== 'video') return { error: ERRORS.UNSUPPORTED };
 
@@ -188,13 +205,16 @@ async function createSticker(sock, msg, keepAspect = false) {
 
 const STICKER_HELP = `🖼️ *Como fazer figurinhas:*
 
-*/f* — Figurinha quadrada (512×512)
-*/f 2* — Figurinha mantendo aspecto original
+*/s* — Amassa a imagem/vídeo inteiro para caber em 512×512
+   (mostra tudo, sem cortar — apenas distorce a proporção)
 
-📸 *Fotos* — Envie ou responda com */f*
+*/s 2* — Mantém a proporção original (fundo transparente)
+   (sem distorcer, sem cortar)
+
+📸 *Fotos* — Envie ou responda com */s*
 🎬 *Vídeos* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
 🎞️ *GIFs* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
 
-_Dica: Responda qualquer mídia com /f para transformá-la em figurinha!_`;
+_Dica: Responda qualquer mídia com /s para transformá-la em figurinha!_`;
 
 module.exports = { createSticker, STICKER_HELP, MIN_VIDEO_DURATION, MAX_VIDEO_DURATION };
