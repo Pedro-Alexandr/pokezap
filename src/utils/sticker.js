@@ -122,46 +122,87 @@ async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
   return new Promise((resolve, reject) => {
     let finished = false;
 
-    try {
-      const stream = require('stream');
-      const inputStream = new stream.PassThrough();
-      inputStream.end(buffer);
+    const stream = require('stream');
+    const inputStream = new stream.PassThrough();
+    inputStream.end(buffer);
 
-      const isGif = mimeType.includes('gif');
-      const inputFormat = isGif ? 'gif' : 'mp4';
+    const isGif = mimeType.includes('gif');
 
-      const scaleFilter = keepAspect
-        ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
-        : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
+    const scaleFilter = keepAspect
+      ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
+      : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
 
-      const chunks = [];
+    const chunks = [];
 
-      const ff = ffmpeg()
-      const stream = require('stream');
-
-      const inputStream = new stream.PassThrough();
-      inputStream.end(buffer);
-
-      const isGif = mimeType.includes('gif');
-
-      const ff = ffmpeg(inputStream)
-        .inputFormat(isGif ? 'gif' : 'mp4');
-
-      // ⏱️ timeout anti travamento (Fly-safe)
-      setTimeout(() => {
+    const ff = ffmpeg(inputStream)
+      .inputFormat(isGif ? 'gif' : 'mp4')
+      .outputOptions([
+        '-vcodec', 'libwebp',
+        '-vf', `fps=15,${scaleFilter},format=rgba`,
+        '-loop', '0',
+        '-an',
+        '-vsync', '0',
+        '-lossless', '0',
+        '-compression_level', '6',
+        '-q:v', '60',
+        '-pix_fmt', 'yuva420p',
+      ])
+      .format('webp')
+      .on('error', async (err) => {
         if (finished) return;
         finished = true;
 
-        try { ff.kill('SIGKILL'); } catch { }
+        releaseQueue();
+
+        console.error('❌ ffmpeg error:', err.message);
+
+        // retry automático 1x
+        if (retry === 0) {
+          try {
+            const result = await processVideo(buffer, mimeType, keepAspect, 1);
+            return resolve(result);
+          } catch (e) {
+            return reject(e);
+          }
+        }
+
+        reject(err);
+      })
+      .on('end', () => {
+        if (finished) return;
+        finished = true;
 
         releaseQueue();
-        reject(new Error('FFMPEG_TIMEOUT'));
-      }, 20000);
 
-    } catch (err) {
+        const finalBuffer = Buffer.concat(chunks);
+
+        if (!finalBuffer || finalBuffer.length < 1000) {
+          return reject(new Error('INVALID_OUTPUT'));
+        }
+
+        resolve({
+          buffer: finalBuffer,
+          animated: true
+        });
+      });
+
+    const proc = ff.pipe();
+
+    proc.on('data', chunk => chunks.push(chunk));
+
+    // timeout seguro (Fly)
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+
+      try { ff.kill('SIGKILL'); } catch {}
+
       releaseQueue();
-      reject(err);
-    }
+      reject(new Error('FFMPEG_TIMEOUT'));
+    }, 20000);
+
+    ff.on('end', () => clearTimeout(timer));
+    ff.on('error', () => clearTimeout(timer));
   });
 }
 function getMediaInfo(msg) {
