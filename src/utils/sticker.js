@@ -137,71 +137,22 @@ async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
       const chunks = [];
 
       const ff = ffmpeg()
-        .input('pipe:0')
-        .inputFormat(inputFormat)
-        .outputOptions([
-          '-vcodec', 'libwebp',
-          '-vf', `fps=15,${scaleFilter},format=rgba`,
-          '-loop', '0',
-          '-an',
-          '-vsync', '0',
-          '-lossless', '0',
-          '-compression_level', '6',
-          '-q:v', '60',
-          '-pix_fmt', 'yuva420p',
-        ])
-        .format('webp')
-        .on('error', async (err) => {
-          if (finished) return;
-          finished = true;
+      const stream = require('stream');
 
-          releaseQueue();
+      const inputStream = new stream.PassThrough();
+      inputStream.end(buffer);
 
-          console.error('❌ ffmpeg error:', err.message);
+      const isGif = mimeType.includes('gif');
 
-          // 🔥 retry automático 1x
-          if (retry === 0) {
-            console.log('♻️ retry ffmpeg...');
-            try {
-              const result = await processVideo(buffer, mimeType, keepAspect, 1);
-              return resolve(result);
-            } catch (e) {
-              return reject(e);
-            }
-          }
-
-          reject(err);
-        })
-        .on('end', () => {
-          if (finished) return;
-          finished = true;
-
-          const finalBuffer = Buffer.concat(chunks);
-
-          releaseQueue();
-
-          if (!finalBuffer || finalBuffer.length < 1000) {
-            return reject(new Error('INVALID_OUTPUT'));
-          }
-
-          resolve({
-            buffer: finalBuffer,
-            animated: true
-          });
-        });
-
-      const proc = ff.pipe();
-
-      proc.on('data', chunk => chunks.push(chunk));
-
-      inputStream.pipe(ff.ffmpegProc.stdin);
+      const ff = ffmpeg(inputStream)
+        .inputFormat(isGif ? 'gif' : 'mp4');
 
       // ⏱️ timeout anti travamento (Fly-safe)
       setTimeout(() => {
         if (finished) return;
         finished = true;
 
-        try { ff.kill('SIGKILL'); } catch {}
+        try { ff.kill('SIGKILL'); } catch { }
 
         releaseQueue();
         reject(new Error('FFMPEG_TIMEOUT'));
