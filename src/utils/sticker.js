@@ -97,79 +97,60 @@ function getVideoDuration(inputPath) {
 async function processVideo(buffer, mimeType, keepAspect) {
   if (!ffmpeg) return { error: ERRORS.NO_FFMPEG };
 
-  const ext = mimeType.includes('gif') ? '.gif' : '.mp4';
-  const input = getTempPath(ext);
-  const output = getTempPath('.webp');
-
-  // 🔥 valida buffer antes de qualquer coisa
   if (!buffer || buffer.length < 10) {
     return { error: ERRORS.PROCESS_FAIL };
   }
 
-  fs.writeFileSync(input, buffer);
+  return new Promise((resolve, reject) => {
+    try {
+      const scaleFilter = keepAspect
+        ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
+        : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
 
-  try {
-    // 🚫 FLY SAFE: NÃO usa ffprobe (isso travava tudo)
-    const duration = 6; // valor seguro fixo
-    if (duration < MIN_VIDEO_DURATION) throw new Error('VIDEO_TOO_SHORT');
-    if (duration > MAX_VIDEO_DURATION) throw new Error('VIDEO_TOO_LONG');
+      const chunks = [];
 
-    const scaleFilter = keepAspect
-      ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
-      : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
-
-    await new Promise((resolve, reject) => {
-      const ff = ffmpeg(input)
-        .inputOptions(['-t', String(MAX_VIDEO_DURATION)])
+      const ff = ffmpeg()
+        .input(buffer)
+        .inputFormat(mimeType.includes('gif') ? 'gif' : 'mp4')
         .outputOptions([
           '-vcodec', 'libwebp',
           '-vf', `fps=15,${scaleFilter},format=rgba`,
           '-loop', '0',
           '-an',
           '-vsync', '0',
-
-          // 🔥 estabilidade no WebP animado
           '-lossless', '0',
           '-compression_level', '6',
           '-q:v', '60',
-          '-preset', 'default',
           '-pix_fmt', 'yuva420p',
         ])
         .format('webp')
-        .output(output)
-        .on('end', resolve)
         .on('error', reject)
-        .run();
+        .on('end', () => {
+          const finalBuffer = Buffer.concat(chunks);
 
-      // 🚨 FORÇA DESBLOQUEIO (ESSENCIAL NO FLY)
-      const timer = setTimeout(() => {
-        try { ff.kill('SIGKILL'); } catch {}
+          if (!finalBuffer || finalBuffer.length < 1000) {
+            return reject(new Error('INVALID_OUTPUT'));
+          }
+
+          resolve({
+            buffer: finalBuffer,
+            animated: true
+          });
+        })
+        .pipe();
+
+      ff.on('data', (chunk) => chunks.push(chunk));
+
+      // 🔥 timeout anti-travamento (Fly-safe)
+      setTimeout(() => {
+        try { ff.destroy(); } catch {}
         reject(new Error('FFMPEG_TIMEOUT'));
       }, 20000);
 
-      ff.on('end', () => clearTimeout(timer));
-      ff.on('error', () => clearTimeout(timer));
-    });
-
-    const resultBuffer = fs.readFileSync(output);
-
-    if (!resultBuffer || resultBuffer.length < 10) {
-      throw new Error('INVALID_OUTPUT');
+    } catch (err) {
+      reject(err);
     }
-
-    return {
-      buffer: resultBuffer,
-      animated: true
-    };
-
-  } catch (err) {
-    console.error('❌ processVideo error:', err.message);
-    return { error: ERRORS.PROCESS_FAIL };
-
-  } finally {
-    try { fs.unlinkSync(input); } catch {}
-    try { fs.unlinkSync(output); } catch {}
-  }
+  });
 }
 function getMediaInfo(msg) {
   const m = msg.message;

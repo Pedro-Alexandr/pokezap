@@ -153,8 +153,7 @@ async function startBot() {
             await send(from, { text: result.error }, { quoted: msg });
           } else {
             await send(from, {
-              sticker: result.buffer,
-              ...(result.animated ? { isAnimated: true } : {})
+              sticker: Buffer.from(result.buffer)
             }, { quoted: msg });
 
             await send(from, { react: { text: '✅', key: msg.key } });
