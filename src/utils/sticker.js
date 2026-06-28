@@ -19,6 +19,25 @@ const MIN_VIDEO_DURATION = 3;
 const MAX_VIDEO_DURATION = 8;
 const STICKER_SIZE = 512;
 
+let processingQueue = 0;
+const MAX_CONCURRENT = 2;
+
+function waitQueue() {
+  return new Promise(resolve => {
+    const interval = setInterval(() => {
+      if (processingQueue < MAX_CONCURRENT) {
+        processingQueue++;
+        clearInterval(interval);
+        resolve();
+      }
+    }, 100);
+  });
+}
+
+function releaseQueue() {
+  processingQueue--;
+}
+
 // ── Carregamento das dependências (com fallback gracioso) ──
 let sharp, ffmpeg, ffmpegPath, ffprobePath;
 try {
@@ -94,15 +113,23 @@ function getVideoDuration(inputPath) {
 }
 
 // ── Processar vídeo/GIF → WebP animado ───────────────────
-async function processVideo(buffer, mimeType, keepAspect) {
+async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
   if (!ffmpeg) return { error: ERRORS.NO_FFMPEG };
+  if (!buffer || buffer.length < 10) return { error: ERRORS.PROCESS_FAIL };
 
-  if (!buffer || buffer.length < 10) {
-    return { error: ERRORS.PROCESS_FAIL };
-  }
+  await waitQueue();
 
   return new Promise((resolve, reject) => {
+    let finished = false;
+
     try {
+      const stream = require('stream');
+      const inputStream = new stream.PassThrough();
+      inputStream.end(buffer);
+
+      const isGif = mimeType.includes('gif');
+      const inputFormat = isGif ? 'gif' : 'mp4';
+
       const scaleFilter = keepAspect
         ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
         : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
@@ -110,8 +137,8 @@ async function processVideo(buffer, mimeType, keepAspect) {
       const chunks = [];
 
       const ff = ffmpeg()
-        .input(buffer)
-        .inputFormat(mimeType.includes('gif') ? 'gif' : 'mp4')
+        .input('pipe:0')
+        .inputFormat(inputFormat)
         .outputOptions([
           '-vcodec', 'libwebp',
           '-vf', `fps=15,${scaleFilter},format=rgba`,
@@ -124,9 +151,34 @@ async function processVideo(buffer, mimeType, keepAspect) {
           '-pix_fmt', 'yuva420p',
         ])
         .format('webp')
-        .on('error', reject)
+        .on('error', async (err) => {
+          if (finished) return;
+          finished = true;
+
+          releaseQueue();
+
+          console.error('❌ ffmpeg error:', err.message);
+
+          // 🔥 retry automático 1x
+          if (retry === 0) {
+            console.log('♻️ retry ffmpeg...');
+            try {
+              const result = await processVideo(buffer, mimeType, keepAspect, 1);
+              return resolve(result);
+            } catch (e) {
+              return reject(e);
+            }
+          }
+
+          reject(err);
+        })
         .on('end', () => {
+          if (finished) return;
+          finished = true;
+
           const finalBuffer = Buffer.concat(chunks);
+
+          releaseQueue();
 
           if (!finalBuffer || finalBuffer.length < 1000) {
             return reject(new Error('INVALID_OUTPUT'));
@@ -136,18 +188,27 @@ async function processVideo(buffer, mimeType, keepAspect) {
             buffer: finalBuffer,
             animated: true
           });
-        })
-        .pipe();
+        });
 
-      ff.on('data', (chunk) => chunks.push(chunk));
+      const proc = ff.pipe();
 
-      // 🔥 timeout anti-travamento (Fly-safe)
+      proc.on('data', chunk => chunks.push(chunk));
+
+      inputStream.pipe(ff.ffmpegProc.stdin);
+
+      // ⏱️ timeout anti travamento (Fly-safe)
       setTimeout(() => {
-        try { ff.destroy(); } catch {}
+        if (finished) return;
+        finished = true;
+
+        try { ff.kill('SIGKILL'); } catch {}
+
+        releaseQueue();
         reject(new Error('FFMPEG_TIMEOUT'));
       }, 20000);
 
     } catch (err) {
+      releaseQueue();
       reject(err);
     }
   });
