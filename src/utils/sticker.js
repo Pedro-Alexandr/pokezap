@@ -20,16 +20,20 @@ const MAX_VIDEO_DURATION = 8;
 const STICKER_SIZE       = 512;
 
 // ── Carregamento das dependências (com fallback gracioso) ──
-let sharp, ffmpeg, ffmpegPath;
+let sharp, ffmpeg, ffmpegPath, ffprobePath;
 try {
   sharp = require('sharp');
 } catch (_) { /* sharp não instalado */ }
 
 try {
-  ffmpeg     = require('fluent-ffmpeg');
+  ffmpeg = require('fluent-ffmpeg');
+
   ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-  if (ffmpeg && ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
-} catch (_) { /* ffmpeg não instalado */ }
+  ffprobePath = require('@ffprobe-installer/ffprobe').path;
+
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  ffmpeg.setFfprobePath(ffprobePath);
+} catch (_) { /* ffmpeg/ffprobe não instalados */ }
 
 // ── Mensagens de erro ─────────────────────────────────────
 const ERRORS = {
@@ -40,7 +44,7 @@ const ERRORS = {
   PROCESS_FAIL:    '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
   STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */f*.',
   NO_SHARP:        '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
-  NO_FFMPEG:       '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg" e "@ffmpeg-installer/ffmpeg" ao package.json e refaça o deploy.',
+  NO_FFMPEG:       '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg", "@ffmpeg-installer/ffmpeg" e "@ffprobe-installer/ffprobe" ao package.json e refaça o deploy.',
 };
 
 function getTempPath(ext) {
