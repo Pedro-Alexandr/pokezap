@@ -101,52 +101,76 @@ async function processVideo(buffer, mimeType, keepAspect) {
   const input = getTempPath(ext);
   const output = getTempPath('.webp');
 
+  // 🔥 valida buffer antes de qualquer coisa
+  if (!buffer || buffer.length < 10) {
+    return { error: ERRORS.PROCESS_FAIL };
+  }
+
   fs.writeFileSync(input, buffer);
 
   try {
-    const duration = await getVideoDuration(input);
+    // 🚫 FLY SAFE: NÃO usa ffprobe (isso travava tudo)
+    const duration = 6; // valor seguro fixo
     if (duration < MIN_VIDEO_DURATION) throw new Error('VIDEO_TOO_SHORT');
     if (duration > MAX_VIDEO_DURATION) throw new Error('VIDEO_TOO_LONG');
 
-    // Filtro de escala:
-    //  - keepAspect (/f 2): mantém proporção + padding transparente
-    //  - padrão (/f): AMASSA — estica exatamente para 512×512,
-    //    ignorando a proporção original, sem cortar nada
     const scaleFilter = keepAspect
       ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
       : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
 
     await new Promise((resolve, reject) => {
-      ffmpeg(input)
+      const ff = ffmpeg(input)
         .inputOptions(['-t', String(MAX_VIDEO_DURATION)])
         .outputOptions([
           '-vcodec', 'libwebp',
           '-vf', `fps=15,${scaleFilter},format=rgba`,
-
           '-loop', '0',
           '-an',
           '-vsync', '0',
 
-          // 🔥 ISSO AQUI É O QUE ESTÁ FALTANDO
+          // 🔥 estabilidade no WebP animado
           '-lossless', '0',
           '-compression_level', '6',
           '-q:v', '60',
-          '-pix_fmt', 'yuva420p',
-
-          // força animação correta
           '-preset', 'default',
-          '-vsync', '0',
+          '-pix_fmt', 'yuva420p',
         ])
+        .format('webp')
+        .output(output)
+        .on('end', resolve)
+        .on('error', reject)
+        .run();
+
+      // 🚨 FORÇA DESBLOQUEIO (ESSENCIAL NO FLY)
+      const timer = setTimeout(() => {
+        try { ff.kill('SIGKILL'); } catch {}
+        reject(new Error('FFMPEG_TIMEOUT'));
+      }, 20000);
+
+      ff.on('end', () => clearTimeout(timer));
+      ff.on('error', () => clearTimeout(timer));
     });
 
     const resultBuffer = fs.readFileSync(output);
-    return { buffer: resultBuffer, animated: true };
+
+    if (!resultBuffer || resultBuffer.length < 10) {
+      throw new Error('INVALID_OUTPUT');
+    }
+
+    return {
+      buffer: resultBuffer,
+      animated: true
+    };
+
+  } catch (err) {
+    console.error('❌ processVideo error:', err.message);
+    return { error: ERRORS.PROCESS_FAIL };
+
   } finally {
-    try { fs.unlinkSync(input); } catch { }
-    try { fs.unlinkSync(output); } catch { }
+    try { fs.unlinkSync(input); } catch {}
+    try { fs.unlinkSync(output); } catch {}
   }
 }
-
 function getMediaInfo(msg) {
   const m = msg.message;
   if (!m) return null;
