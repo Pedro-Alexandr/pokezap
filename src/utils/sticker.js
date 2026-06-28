@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════
 //  STICKER PROCESSOR
 //
-//  /s   → AMASSA a imagem/vídeo inteiro para caber em 512×512
+//  /f   → AMASSA a imagem/vídeo inteiro para caber em 512×512
 //         (distorce a proporção, mas mostra o conteúdo completo,
 //          sem cortar nada)
-//  /s 2 → mantém a proporção ORIGINAL, com fundo transparente
+//  /f 2 → mantém a proporção ORIGINAL, com fundo transparente
 //         preenchendo o espaço restante (sem distorcer, sem cortar)
 //
 //  Dependências (já no package.json): sharp, fluent-ffmpeg,
@@ -33,12 +33,12 @@ try {
 
 // ── Mensagens de erro ─────────────────────────────────────
 const ERRORS = {
-  NO_MEDIA:        '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */s*.',
+  NO_MEDIA:        '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.',
   UNSUPPORTED:     '❌ Tipo de mídia não suportado.\nEnvie uma *foto*, *vídeo* ou *GIF*.',
   VIDEO_TOO_SHORT: `❌ O vídeo é muito curto!\nMínimo: *${MIN_VIDEO_DURATION} segundos*.`,
   VIDEO_TOO_LONG:  `❌ O vídeo é muito longo!\nMáximo: *${MAX_VIDEO_DURATION} segundos*.`,
   PROCESS_FAIL:    '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
-  STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */s*.',
+  STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */f*.',
   NO_SHARP:        '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
   NO_FFMPEG:       '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg" e "@ffmpeg-installer/ffmpeg" ao package.json e refaça o deploy.',
 };
@@ -56,14 +56,14 @@ async function processImage(buffer, keepAspect) {
     let pipeline = sharp(buffer);
 
     if (keepAspect) {
-      // /s 2 → mantém a proporção original, preenchendo o restante
+      // /f 2 → mantém a proporção original, preenchendo o restante
       // com fundo transparente (NÃO corta, NÃO distorce)
       pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
         fit: 'contain',
         background: { r: 0, g: 0, b: 0, alpha: 0 },
       });
     } else {
-      // /s → AMASSA a imagem inteira para caber exatamente em 512×512,
+      // /f → AMASSA a imagem inteira para caber exatamente em 512×512,
       // ignorando a proporção original (distorce, mas mostra tudo,
       // sem cortar nenhuma parte)
       pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
@@ -105,8 +105,8 @@ async function processVideo(buffer, mimeType, keepAspect) {
     if (duration > MAX_VIDEO_DURATION) throw new Error('VIDEO_TOO_LONG');
 
     // Filtro de escala:
-    //  - keepAspect (/s 2): mantém proporção + padding transparente
-    //  - padrão (/s): AMASSA — estica exatamente para 512×512,
+    //  - keepAspect (/f 2): mantém proporção + padding transparente
+    //  - padrão (/f): AMASSA — estica exatamente para 512×512,
     //    ignorando a proporção original, sem cortar nada
     const scaleFilter = keepAspect
       ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
@@ -205,16 +205,16 @@ async function createSticker(sock, msg, keepAspect = false) {
 
 const STICKER_HELP = `🖼️ *Como fazer figurinhas:*
 
-*/s* — Amassa a imagem/vídeo inteiro para caber em 512×512
+*/f* — Amassa a imagem/vídeo inteiro para caber em 512×512
    (mostra tudo, sem cortar — apenas distorce a proporção)
 
-*/s 2* — Mantém a proporção original (fundo transparente)
+*/f 2* — Mantém a proporção original (fundo transparente)
    (sem distorcer, sem cortar)
 
-📸 *Fotos* — Envie ou responda com */s*
+📸 *Fotos* — Envie ou responda com */f*
 🎬 *Vídeos* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
 🎞️ *GIFs* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
 
-_Dica: Responda qualquer mídia com /s para transformá-la em figurinha!_`;
+_Dica: Responda qualquer mídia com /f para transformá-la em figurinha!_`;
 
 module.exports = { createSticker, STICKER_HELP, MIN_VIDEO_DURATION, MAX_VIDEO_DURATION };
