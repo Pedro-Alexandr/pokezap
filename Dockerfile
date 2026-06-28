@@ -1,47 +1,55 @@
 # syntax = docker/dockerfile:1
 
-# Adjust NODE_VERSION as desired
 ARG NODE_VERSION=24.14.1
 FROM node:${NODE_VERSION}-slim AS base
 
 LABEL fly_launch_runtime="Node.js"
 
-# Node.js app lives here
 WORKDIR /app
 
-# Set production environment
 ENV NODE_ENV="production"
 
-
-# Throw-away build stage to reduce size of final image
+# ─────────────────────────────
+# BUILD STAGE
+# ─────────────────────────────
 FROM base AS build
 
-# Install packages needed to build node modules
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential node-gyp pkg-config python-is-python3 \
-    apt-get install -y webp
+    apt-get install --no-install-recommends -y \
+    build-essential \
+    node-gyp \
+    pkg-config \
+    python-is-python3 \
+    webp \
+    ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 
-# Install node modules
-COPY package-lock.json package.json ./
+COPY package*.json ./
 RUN npm ci
 
-# Copy application code
 COPY . .
 
-
-# Final stage for app image
+# ─────────────────────────────
+# FINAL STAGE
+# ─────────────────────────────
 FROM base
 
-# Copy built application
+WORKDIR /app
+
 COPY --from=build /app /app
 
-# Setup sqlite3 on a separate volume
+# runtime deps (caso não estejam no build final)
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y \
+    ffmpeg \
+    webp \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /data
 VOLUME /data
 
-RUN apt-get update && apt-get install -y ffmpeg
-
-# Start the server by default, this can be overwritten at runtime
 EXPOSE 3000
+
 ENV DATABASE_URL="file:///data/sqlite.db"
+
 CMD [ "npm", "run", "start" ]
