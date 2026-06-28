@@ -138,16 +138,24 @@ async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
       .inputFormat(isGif ? 'gif' : 'mp4')
       .outputOptions([
         '-vcodec', 'libwebp',
-        '-vf', `fps=15,${scaleFilter},format=rgba`,
+
+        // 🔥 IMPORTANTE: ordem correta
+        '-vf',
+        `fps=12,${scaleFilter}:flags=lanczos`,
+
+        // 🔥 compliance WhatsApp
         '-loop', '0',
         '-an',
         '-vsync', '0',
-        '-lossless', '0',
+
+        // qualidade estável (IMPORTANTE)
+        '-q:v', '70',
         '-compression_level', '6',
-        '-q:v', '60',
-        '-pix_fmt', 'yuva420p',
+
+        // 🔥 ESSENCIAL PARA STICKER FUNCIONAR
+        '-preset', 'default',
+        '-f', 'webp'
       ])
-      .format('webp')
       .on('error', async (err) => {
         if (finished) return;
         finished = true;
@@ -195,7 +203,7 @@ async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
       if (finished) return;
       finished = true;
 
-      try { ff.kill('SIGKILL'); } catch {}
+      try { ff.kill('SIGKILL'); } catch { }
 
       releaseQueue();
       reject(new Error('FFMPEG_TIMEOUT'));
