@@ -4,7 +4,7 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
 } = require('@whiskeysockets/baileys');
-const pino   = require('pino');
+const pino = require('pino');
 const qrcode = require('qrcode-terminal');
 
 // Carregamento com logging para detectar falhas de import
@@ -38,7 +38,7 @@ try {
 //  mandando "!status" para si mesmo ou em um grupo) — essas
 //  SÃO processadas normalmente.
 // ═══════════════════════════════════════════════════════
-const sentMessageIds  = new Set();
+const sentMessageIds = new Set();
 const MAX_TRACKED_IDS = 1000;
 
 function trackSentId(id) {
@@ -57,7 +57,7 @@ function normalizeJid(jid) {
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-  const { version }          = await fetchLatestBaileysVersion();
+  const { version } = await fetchLatestBaileysVersion();
 
   console.log(`📡 Baileys versão: ${version}`);
 
@@ -66,7 +66,7 @@ async function startBot() {
     logger: pino({ level: 'silent' }),
     auth: state,
     printQRInTerminal: false,
-    connectTimeoutMs:    60_000,
+    connectTimeoutMs: 60_000,
     keepAliveIntervalMs: 25_000,
     retryRequestDelayMs: 2_000,
   });
@@ -115,7 +115,7 @@ async function startBot() {
       // ── Anti-loop: ignora o eco da própria resposta do bot ──
       if (msg.key.fromMe && sentMessageIds.has(msg.key.id)) continue;
 
-      const from    = msg.key.remoteJid;
+      const from = msg.key.remoteJid;
       const isGroup = from?.endsWith('@g.us') ?? false;
 
       // Determina quem "enviou" o comando, para fins de jogo (trainerId):
@@ -130,35 +130,44 @@ async function startBot() {
       }
 
       const text =
-        msg.message.conversation              ??
+        msg.message.conversation ??
         msg.message.extendedTextMessage?.text ??
-        msg.message.imageMessage?.caption     ??
-        msg.message.videoMessage?.caption     ??
+        msg.message.imageMessage?.caption ??
+        msg.message.videoMessage?.caption ??
         '';
 
       const trimmed = text.trim();
 
       // ── Figurinhas ───────────────────────────────────
+      // ── Figurinhas ───────────────────────────────────
       if (trimmed === '/f' || trimmed === '/f 2') {
         const keepAspect = trimmed === '/f 2';
+
         try {
           await send(from, { react: { text: '⏳', key: msg.key } });
+
           const result = await createSticker(sock, msg, keepAspect);
+
           if (result.error) {
+            await send(from, { react: { text: '❌', key: msg.key } });
             await send(from, { text: result.error }, { quoted: msg });
           } else {
-            await send(from,
-              { sticker: result.buffer, ...(result.animated ? { isAnimated: true } : {}) },
-              { quoted: msg }
-            );
+            await send(from, {
+              sticker: result.buffer,
+              ...(result.animated ? { isAnimated: true } : {})
+            }, { quoted: msg });
+
+            await send(from, { react: { text: '✅', key: msg.key } });
           }
+
         } catch (err) {
           console.error('[Sticker] Erro:', err.message);
-          await send(from, { text: '❌ Erro ao criar figurinha. Tente novamente.' }, { quoted: msg });
+          await send(from, { react: { text: '❌', key: msg.key } });
+          await send(from, { text: '❌ Erro ao criar figurinha.' }, { quoted: msg });
         }
+
         continue;
       }
-
       // ── Comandos RPG ─────────────────────────────────
       if (!trimmed.startsWith('!')) continue;
 
@@ -173,7 +182,7 @@ async function startBot() {
         console.error(`[CMD] Erro em "${trimmed}":`, err.message);
         try {
           await send(from, { text: '❌ Erro interno ao processar o comando. Tente novamente.' }, { quoted: msg });
-        } catch (_) {}
+        } catch (_) { }
       }
     }
   });

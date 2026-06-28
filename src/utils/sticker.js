@@ -12,12 +12,12 @@
 // ═══════════════════════════════════════════════════════════
 
 const path = require('path');
-const fs   = require('fs');
-const os   = require('os');
+const fs = require('fs');
+const os = require('os');
 
 const MIN_VIDEO_DURATION = 3;
 const MAX_VIDEO_DURATION = 8;
-const STICKER_SIZE       = 512;
+const STICKER_SIZE = 512;
 
 // ── Carregamento das dependências (com fallback gracioso) ──
 let sharp, ffmpeg, ffmpegPath, ffprobePath;
@@ -37,14 +37,14 @@ try {
 
 // ── Mensagens de erro ─────────────────────────────────────
 const ERRORS = {
-  NO_MEDIA:        '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.',
-  UNSUPPORTED:     '❌ Tipo de mídia não suportado.\nEnvie uma *foto*, *vídeo* ou *GIF*.',
+  NO_MEDIA: '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.',
+  UNSUPPORTED: '❌ Tipo de mídia não suportado.\nEnvie uma *foto*, *vídeo* ou *GIF*.',
   VIDEO_TOO_SHORT: `❌ O vídeo é muito curto!\nMínimo: *${MIN_VIDEO_DURATION} segundos*.`,
-  VIDEO_TOO_LONG:  `❌ O vídeo é muito longo!\nMáximo: *${MAX_VIDEO_DURATION} segundos*.`,
-  PROCESS_FAIL:    '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
-  STICKER_INPUT:   '❌ Você enviou uma figurinha! Para converter, responda-a com */f*.',
-  NO_SHARP:        '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
-  NO_FFMPEG:       '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg", "@ffmpeg-installer/ffmpeg" e "@ffprobe-installer/ffprobe" ao package.json e refaça o deploy.',
+  VIDEO_TOO_LONG: `❌ O vídeo é muito longo!\nMáximo: *${MAX_VIDEO_DURATION} segundos*.`,
+  PROCESS_FAIL: '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
+  STICKER_INPUT: '❌ Você enviou uma figurinha! Para converter, responda-a com */f*.',
+  NO_SHARP: '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
+  NO_FFMPEG: '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg", "@ffmpeg-installer/ffmpeg" e "@ffprobe-installer/ffprobe" ao package.json e refaça o deploy.',
 };
 
 function getTempPath(ext) {
@@ -97,8 +97,8 @@ function getVideoDuration(inputPath) {
 async function processVideo(buffer, mimeType, keepAspect) {
   if (!ffmpeg) return { error: ERRORS.NO_FFMPEG };
 
-  const ext    = mimeType.includes('gif') ? '.gif' : '.mp4';
-  const input  = getTempPath(ext);
+  const ext = mimeType.includes('gif') ? '.gif' : '.mp4';
+  const input = getTempPath(ext);
   const output = getTempPath('.webp');
 
   fs.writeFileSync(input, buffer);
@@ -121,24 +121,29 @@ async function processVideo(buffer, mimeType, keepAspect) {
         .inputOptions(['-t', String(MAX_VIDEO_DURATION)])
         .outputOptions([
           '-vcodec', 'libwebp',
-          '-vf', `${scaleFilter},fps=15`,
+          '-vf', `fps=15,${scaleFilter},format=rgba`,
+
           '-loop', '0',
+          '-an',
+          '-vsync', '0',
+
+          // 🔥 ISSO AQUI É O QUE ESTÁ FALTANDO
+          '-lossless', '0',
+          '-compression_level', '6',
+          '-q:v', '60',
+          '-pix_fmt', 'yuva420p',
+
+          // força animação correta
           '-preset', 'default',
-          '-an', '-vsync', '0',
-          '-s', `${STICKER_SIZE}x${STICKER_SIZE}`,
+          '-vsync', '0',
         ])
-        .format('webp')
-        .output(output)
-        .on('end', resolve)
-        .on('error', reject)
-        .run();
     });
 
     const resultBuffer = fs.readFileSync(output);
     return { buffer: resultBuffer, animated: true };
   } finally {
-    try { fs.unlinkSync(input);  } catch {}
-    try { fs.unlinkSync(output); } catch {}
+    try { fs.unlinkSync(input); } catch { }
+    try { fs.unlinkSync(output); } catch { }
   }
 }
 
@@ -150,8 +155,8 @@ function getMediaInfo(msg) {
   const target = quoted || m;
 
   if (target.stickerMessage) return { type: 'sticker' };
-  if (target.imageMessage)   return { type: 'image', mime: target.imageMessage.mimetype || 'image/jpeg' };
-  if (target.videoMessage)   return { type: 'video', mime: target.videoMessage.mimetype || 'video/mp4' };
+  if (target.imageMessage) return { type: 'image', mime: target.imageMessage.mimetype || 'image/jpeg' };
+  if (target.videoMessage) return { type: 'video', mime: target.videoMessage.mimetype || 'video/mp4' };
   if (target.documentMessage) {
     const mime = target.documentMessage.mimetype || '';
     if (mime.startsWith('image/') || mime.startsWith('video/')) {
@@ -163,7 +168,7 @@ function getMediaInfo(msg) {
 
 async function createSticker(sock, msg, keepAspect = false) {
   const info = getMediaInfo(msg);
-  if (!info)                   return { error: ERRORS.NO_MEDIA };
+  if (!info) return { error: ERRORS.NO_MEDIA };
   if (info.type === 'sticker') return { error: ERRORS.STICKER_INPUT };
   if (info.type !== 'image' && info.type !== 'video') return { error: ERRORS.UNSUPPORTED };
 
@@ -173,14 +178,14 @@ async function createSticker(sock, msg, keepAspect = false) {
     const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
     const target = quoted
       ? {
-          key: {
-            remoteJid: msg.key.remoteJid,
-            id: msg.message.extendedTextMessage.contextInfo.stanzaId,
-            fromMe: false,
-            participant: msg.message.extendedTextMessage.contextInfo.participant,
-          },
-          message: quoted,
-        }
+        key: {
+          remoteJid: msg.key.remoteJid,
+          id: msg.message.extendedTextMessage.contextInfo.stanzaId,
+          fromMe: false,
+          participant: msg.message.extendedTextMessage.contextInfo.participant,
+        },
+        message: quoted,
+      }
       : msg;
 
     mediaBuffer = await downloadMediaMessage(
@@ -199,7 +204,7 @@ async function createSticker(sock, msg, keepAspect = false) {
     if (info.type === 'video') return await processVideo(mediaBuffer, info.mime, keepAspect);
   } catch (err) {
     if (err.message === 'VIDEO_TOO_SHORT') return { error: ERRORS.VIDEO_TOO_SHORT };
-    if (err.message === 'VIDEO_TOO_LONG')  return { error: ERRORS.VIDEO_TOO_LONG  };
+    if (err.message === 'VIDEO_TOO_LONG') return { error: ERRORS.VIDEO_TOO_LONG };
     console.error('Erro sticker:', err);
     return { error: ERRORS.PROCESS_FAIL };
   }
