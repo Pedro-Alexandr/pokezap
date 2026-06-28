@@ -213,6 +213,47 @@ async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
     ff.on('error', () => clearTimeout(timer));
   });
 }
+
+// função para converter vídeo em sticker webp
+async function videoToSticker(buffer) {
+  const input = path.join(os.tmpdir(), `in_${Date.now()}.gif`);
+  const output = path.join(os.tmpdir(), `out_${Date.now()}.webp`);
+
+  fs.writeFileSync(input, buffer);
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      input,
+      '-o',
+      output,
+      '-v',
+      '--lossless',
+      '--quality',
+      '80',
+      '--resize',
+      '512',
+      '512'
+    ];
+
+    const proc = spawn('cwebp', args);
+
+    proc.on('close', (code) => {
+      try {
+        if (code !== 0) return reject(new Error('cwebp failed'));
+
+        const result = fs.readFileSync(output);
+
+        fs.unlinkSync(input);
+        fs.unlinkSync(output);
+
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
+
 function getMediaInfo(msg) {
   const m = msg.message;
   if (!m) return null;
@@ -267,7 +308,12 @@ async function createSticker(sock, msg, keepAspect = false) {
 
   try {
     if (info.type === 'image') return await processImage(mediaBuffer, keepAspect);
-    if (info.type === 'video') return await processVideo(mediaBuffer, info.mime, keepAspect);
+    if (info.type === 'video' || info.type === 'image') {
+      return {
+        buffer: await videoToSticker(mediaBuffer),
+        animated: true
+      };
+    }
   } catch (err) {
     if (err.message === 'VIDEO_TOO_SHORT') return { error: ERRORS.VIDEO_TOO_SHORT };
     if (err.message === 'VIDEO_TOO_LONG') return { error: ERRORS.VIDEO_TOO_LONG };
