@@ -1,440 +1,342 @@
 // ═══════════════════════════════════════════════════════════
-// STICKER PROCESSOR v2
-// Compatível com Baileys 7 + Fly.io
+//  STICKER PROCESSOR
+//
+//  /f   → AMASSA a imagem/vídeo inteiro para caber em 512×512
+//         (distorce a proporção, mas mostra o conteúdo completo,
+//          sem cortar nada)
+//  /f 2 → mantém a proporção ORIGINAL, com fundo transparente
+//         preenchendo o espaço restante (sem distorcer, sem cortar)
+//
+//  Dependências (já no package.json): sharp, fluent-ffmpeg,
+//  @ffmpeg-installer/ffmpeg
 // ═══════════════════════════════════════════════════════════
 
-const webpmux = require("node-webpmux");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const sharp = require("sharp");
-
-const ffmpeg = require("fluent-ffmpeg");
-const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-const ffprobePath = require("@ffprobe-installer/ffprobe").path;
-
-const { downloadMediaMessage } = require("@whiskeysockets/baileys");
-
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
-
-// ---------------- CONFIG ----------------
-
-const STICKER_SIZE = 512;
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 
 const MIN_VIDEO_DURATION = 3;
 const MAX_VIDEO_DURATION = 8;
+const STICKER_SIZE = 512;
 
+let processingQueue = 0;
 const MAX_CONCURRENT = 2;
 
-const PACK_NAME = "Pokemon Bot";
-const AUTHOR = "Pedro";
-
-// ----------------------------------------
-
-const ERRORS = {
-    NO_MEDIA:
-        "❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.",
-
-    STICKER_INPUT:
-        "❌ Responda uma figurinha com */f* para convertê-la.",
-
-    UNSUPPORTED:
-        "❌ Tipo de mídia não suportado.",
-
-    VIDEO_TOO_SHORT:
-        `❌ O vídeo deve ter pelo menos ${MIN_VIDEO_DURATION}s.`,
-
-    VIDEO_TOO_LONG:
-        `❌ O vídeo deve ter no máximo ${MAX_VIDEO_DURATION}s.`,
-
-    PROCESS_FAIL:
-        "❌ Não foi possível criar a figurinha."
-};
-
-// ==========================================================
-// FILA
-// ==========================================================
-
-let running = 0;
-
-async function waitQueue() {
-
-    while (running >= MAX_CONCURRENT) {
-
-        await new Promise(r => setTimeout(r, 150));
-
-    }
-
-    running++;
-
+function waitQueue() {
+  return new Promise(resolve => {
+    const interval = setInterval(() => {
+      if (processingQueue < MAX_CONCURRENT) {
+        processingQueue++;
+        clearInterval(interval);
+        resolve();
+      }
+    }, 100);
+  });
 }
 
 function releaseQueue() {
-
-    running = Math.max(0, running - 1);
-
+  processingQueue--;
 }
 
-// ==========================================================
-// TEMP
-// ==========================================================
+// ── Carregamento das dependências (com fallback gracioso) ──
+let sharp, ffmpeg, ffmpegPath, ffprobePath;
+try {
+  sharp = require('sharp');
+} catch (_) { /* sharp não instalado */ }
 
-function temp(ext) {
+try {
+  ffmpeg = require('fluent-ffmpeg');
 
-    return path.join(
-        os.tmpdir(),
-        `sticker_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`
-    );
+  ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+  ffprobePath = require('@ffprobe-installer/ffprobe').path;
 
+  ffmpeg.setFfmpegPath(ffmpegPath);
+  ffmpeg.setFfprobePath(ffprobePath);
+} catch (_) { /* ffmpeg/ffprobe não instalados */ }
+
+// ── Mensagens de erro ─────────────────────────────────────
+const ERRORS = {
+  NO_MEDIA: '❌ Nenhuma mídia encontrada!\nEnvie ou responda uma foto, vídeo ou GIF com */f*.',
+  UNSUPPORTED: '❌ Tipo de mídia não suportado.\nEnvie uma *foto*, *vídeo* ou *GIF*.',
+  VIDEO_TOO_SHORT: `❌ O vídeo é muito curto!\nMínimo: *${MIN_VIDEO_DURATION} segundos*.`,
+  VIDEO_TOO_LONG: `❌ O vídeo é muito longo!\nMáximo: *${MAX_VIDEO_DURATION} segundos*.`,
+  PROCESS_FAIL: '❌ Não foi possível criar a figurinha. Tente novamente com outra mídia.',
+  STICKER_INPUT: '❌ Você enviou uma figurinha! Para converter, responda-a com */f*.',
+  NO_SHARP: '❌ Módulo *sharp* não está instalado no servidor.\nAdicione "sharp" ao package.json e refaça o deploy.',
+  NO_FFMPEG: '❌ Módulos de vídeo não instalados no servidor.\nAdicione "fluent-ffmpeg", "@ffmpeg-installer/ffmpeg" e "@ffprobe-installer/ffprobe" ao package.json e refaça o deploy.',
+};
+
+function getTempPath(ext) {
+  const name = `sticker_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`;
+  return path.join(os.tmpdir(), name);
 }
 
-// ==========================================================
-// DURAÇÃO
-// ==========================================================
-
-function getDuration(file) {
-
-    return new Promise((resolve, reject) => {
-
-        ffmpeg.ffprobe(file, (err, meta) => {
-
-            if (err) return reject(err);
-
-            resolve(meta?.format?.duration || 0);
-
-        });
-
-    });
-
-}
-
-// ==========================================================
-// IDENTIFICA A MÍDIA
-// ==========================================================
-
-function getMediaInfo(msg) {
-
-    const message = msg.message;
-
-    if (!message) return null;
-
-    const quoted =
-        message.extendedTextMessage?.contextInfo?.quotedMessage;
-
-    const target = quoted || message;
-
-    if (target.stickerMessage) {
-
-        return { type: "sticker" };
-
-    }
-
-    if (target.imageMessage) {
-
-        return {
-            type: "image",
-            mime: target.imageMessage.mimetype || "image/jpeg"
-        };
-
-    }
-
-    if (target.videoMessage) {
-
-        return {
-            type: "video",
-            mime: target.videoMessage.mimetype || "video/mp4"
-        };
-
-    }
-
-    return null;
-
-}
-
-// ==========================================================
-// BAIXA A MÍDIA
-// ==========================================================
-
-async function downloadBuffer(sock, msg) {
-
-    const quoted =
-        msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-
-    const target = quoted
-        ? {
-            key: {
-                remoteJid: msg.key.remoteJid,
-                id: msg.message.extendedTextMessage.contextInfo.stanzaId,
-                participant:
-                    msg.message.extendedTextMessage.contextInfo.participant,
-                fromMe: false
-            },
-            message: quoted
-        }
-        : msg;
-
-    return await downloadMediaMessage(
-        target,
-        "buffer",
-        {},
-        {
-            logger: require("pino")({
-                level: "silent"
-            }),
-            reuploadRequest: sock.updateMediaMessage
-        }
-    );
-
-}
-
-// ==========================================================
-// IMAGEM -> WEBP
-// ==========================================================
-
+// ── Processar imagem → WebP ───────────────────────────────
 async function processImage(buffer, keepAspect) {
+  if (!sharp) return { error: ERRORS.NO_SHARP };
 
-    let image = sharp(buffer);
+  try {
+    let pipeline = sharp(buffer);
 
-    image = image.resize(STICKER_SIZE, STICKER_SIZE, {
-        fit: keepAspect ? "contain" : "fill",
-        background: {
-            r: 0,
-            g: 0,
-            b: 0,
-            alpha: 0
-        }
-    });
+    if (keepAspect) {
+      // /f 2 → mantém a proporção original, preenchendo o restante
+      // com fundo transparente (NÃO corta, NÃO distorce)
+      pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      });
+    } else {
+      // /f → AMASSA a imagem inteira para caber exatamente em 512×512,
+      // ignorando a proporção original (distorce, mas mostra tudo,
+      // sem cortar nenhuma parte)
+      pipeline = pipeline.resize(STICKER_SIZE, STICKER_SIZE, {
+        fit: 'fill',
+      });
+    }
 
-    const output = await image
-        .webp({
-            quality: 85
-        })
-        .toBuffer();
-
-    return {
-        buffer: output,
-        animated: false
-    };
-
+    const buf = await pipeline.webp({ quality: 80, lossless: false }).toBuffer();
+    return { buffer: buf, animated: false };
+  } catch (err) {
+    console.error('Erro sharp:', err);
+    return { error: ERRORS.PROCESS_FAIL };
+  }
 }
 
-// ==========================================================
-// VÍDEO/GIF -> WEBP
-// ==========================================================
+function getVideoDuration(inputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(inputPath, (err, metadata) => {
+      if (err) return reject(err);
+      const dur = metadata?.format?.duration;
+      resolve(typeof dur === 'number' ? dur : parseFloat(dur) || 0);
+    });
+  });
+}
 
-async function processVideo(buffer, mime, keepAspect) {
+// ── Processar vídeo/GIF → WebP animado ───────────────────
+async function processVideo(buffer, mimeType, keepAspect, retry = 0) {
+  if (!ffmpeg) return { error: ERRORS.NO_FFMPEG };
+  if (!buffer || buffer.length < 10) return { error: ERRORS.PROCESS_FAIL };
 
-    await waitQueue();
+  await waitQueue();
 
-    const input = temp(
-        mime.includes("gif")
-            ? ".gif"
-            : ".mp4"
-    );
+  return new Promise((resolve, reject) => {
+    let finished = false;
 
-    const output = temp(".webp");
+    const stream = require('stream');
+    const inputStream = new stream.PassThrough();
+    inputStream.end(buffer);
 
-    try {
+    const isGif = mimeType.includes('gif');
 
-        fs.writeFileSync(input, buffer);
+    const scaleFilter = keepAspect
+      ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
+      : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
 
-        const duration = await getDuration(input);
+    const chunks = [];
 
-        if (duration < MIN_VIDEO_DURATION)
-            throw new Error("VIDEO_TOO_SHORT");
+    const ff = ffmpeg(inputStream)
+      .inputFormat(isGif ? 'gif' : 'mp4')
+      .outputOptions([
+        '-vcodec', 'libwebp',
 
-        if (duration > MAX_VIDEO_DURATION)
-            throw new Error("VIDEO_TOO_LONG");
+        // 🔥 IMPORTANTE: ordem correta
+        '-vf',
+        `fps=12,${scaleFilter}:flags=lanczos`,
 
-        const scale = keepAspect
-            ? `scale=${STICKER_SIZE}:${STICKER_SIZE}:force_original_aspect_ratio=decrease,pad=${STICKER_SIZE}:${STICKER_SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000`
-            : `scale=${STICKER_SIZE}:${STICKER_SIZE}`;
+        // 🔥 compliance WhatsApp
+        '-loop', '0',
+        '-an',
+        '-vsync', '0',
 
-        await new Promise((resolve, reject) => {
+        // qualidade estável (IMPORTANTE)
+        '-q:v', '70',
+        '-compression_level', '6',
 
-            ffmpeg(input)
-
-                .outputOptions([
-
-                    "-vcodec", "libwebp",
-
-                    "-vf",
-                    `fps=15,${scale}`,
-
-                    "-loop", "0",
-
-                    "-preset",
-                    "picture",
-
-                    "-an",
-
-                    "-vsync",
-                    "0",
-
-                    "-compression_level",
-                    "6",
-
-                    "-q:v",
-                    "70"
-
-                ])
-
-                .duration(MAX_VIDEO_DURATION)
-
-                .format("webp")
-
-                .save(output)
-
-                .on("end", resolve)
-
-                .on("error", reject);
-
-        });
-
-        const result = fs.readFileSync(output);
-
-        if (result.length < 500) {
-
-            throw new Error("INVALID_OUTPUT");
-
-        }
-
-        return {
-
-            buffer: result,
-            animated: true
-
-        };
-
-    }
-    finally {
+        // 🔥 ESSENCIAL PARA STICKER FUNCIONAR
+        '-preset', 'default',
+        '-f', 'webp'
+      ])
+      .on('error', async (err) => {
+        if (finished) return;
+        finished = true;
 
         releaseQueue();
 
-        try {
-            fs.unlinkSync(input);
-        } catch { }
+        console.error('❌ ffmpeg error:', err.message);
 
-        try {
-            fs.unlinkSync(output);
-        } catch { }
+        // retry automático 1x
+        if (retry === 0) {
+          try {
+            const result = await processVideo(buffer, mimeType, keepAspect, 1);
+            return resolve(result);
+          } catch (e) {
+            return reject(e);
+          }
+        }
 
-    }
+        reject(err);
+      })
+      .on('end', () => {
+        if (finished) return;
+        finished = true;
 
+        releaseQueue();
+
+        const finalBuffer = Buffer.concat(chunks);
+
+        if (!finalBuffer || finalBuffer.length < 1000) {
+          return reject(new Error('INVALID_OUTPUT'));
+        }
+
+        resolve({
+          buffer: finalBuffer,
+          animated: true
+        });
+      });
+
+    const proc = ff.pipe();
+
+    proc.on('data', chunk => chunks.push(chunk));
+
+    // timeout seguro (Fly)
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+
+      try { ff.kill('SIGKILL'); } catch { }
+
+      releaseQueue();
+      reject(new Error('FFMPEG_TIMEOUT'));
+    }, 20000);
+
+    ff.on('end', () => clearTimeout(timer));
+    ff.on('error', () => clearTimeout(timer));
+  });
 }
 
-// ==========================================================
-// ADICIONA EXIF (PACKNAME / AUTHOR)
-// ==========================================================
+// função para converter vídeo em sticker webp
+async function videoToSticker(buffer) {
+  const input = path.join(os.tmpdir(), `in_${Date.now()}.gif`);
+  const output = path.join(os.tmpdir(), `out_${Date.now()}.webp`);
 
-async function addExif(webpBuffer) {
+  fs.writeFileSync(input, buffer);
 
-    const img = new webpmux.Image();
+  return new Promise((resolve, reject) => {
+    const args = [
+      input,
+      '-o',
+      output,
+      '-v',
+      '--lossless',
+      '--quality',
+      '80',
+      '--resize',
+      '512',
+      '512'
+    ];
 
-    await img.load(webpBuffer);
+    const proc = spawn('cwebp', args);
 
-    const json = {
-        "sticker-pack-id": "pokemon-bot",
-        "sticker-pack-name": PACK_NAME,
-        "sticker-pack-publisher": AUTHOR,
-        emojis: []
-    };
+    proc.on('close', (code) => {
+      try {
+        if (code !== 0) return reject(new Error('cwebp failed'));
 
-    const exifAttr = Buffer.from([
-        0x49,0x49,0x2A,0x00,
-        0x08,0x00,0x00,0x00,
-        0x01,0x00,
-        0x41,0x57,
-        0x07,0x00
-    ]);
+        const result = fs.readFileSync(output);
 
-    const jsonBuffer = Buffer.from(JSON.stringify(json));
+        fs.unlinkSync(input);
+        fs.unlinkSync(output);
 
-    const exif = Buffer.concat([
-        exifAttr,
-        Buffer.from([
-            jsonBuffer.length & 0xff,
-            (jsonBuffer.length >> 8) & 0xff,
-            (jsonBuffer.length >> 16) & 0xff,
-            (jsonBuffer.length >> 24) & 0xff
-        ]),
-        jsonBuffer
-    ]);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
 
-    img.exif = exif;
+function getMediaInfo(msg) {
+  const m = msg.message;
+  if (!m) return null;
 
-    return await img.save(null);
+  const quoted = m.extendedTextMessage?.contextInfo?.quotedMessage;
+  const target = quoted || m;
 
+  if (target.stickerMessage) return { type: 'sticker' };
+  if (target.imageMessage) return { type: 'image', mime: target.imageMessage.mimetype || 'image/jpeg' };
+  if (target.videoMessage) return { type: 'video', mime: target.videoMessage.mimetype || 'video/mp4' };
+  if (target.documentMessage) {
+    const mime = target.documentMessage.mimetype || '';
+    if (mime.startsWith('image/') || mime.startsWith('video/')) {
+      return { type: mime.startsWith('video/') ? 'video' : 'image', mime };
+    }
+  }
+  return null;
 }
 
 async function createSticker(sock, msg, keepAspect = false) {
+  const info = getMediaInfo(msg);
+  if (!info) return { error: ERRORS.NO_MEDIA };
+  if (info.type === 'sticker') return { error: ERRORS.STICKER_INPUT };
+  if (info.type !== 'image' && info.type !== 'video') return { error: ERRORS.UNSUPPORTED };
 
-    const info = getMediaInfo(msg);
+  let mediaBuffer;
+  try {
+    const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    const target = quoted
+      ? {
+        key: {
+          remoteJid: msg.key.remoteJid,
+          id: msg.message.extendedTextMessage.contextInfo.stanzaId,
+          fromMe: false,
+          participant: msg.message.extendedTextMessage.contextInfo.participant,
+        },
+        message: quoted,
+      }
+      : msg;
 
-    if (!info)
-        return { error: ERRORS.NO_MEDIA };
+    mediaBuffer = await downloadMediaMessage(
+      target,
+      'buffer',
+      {},
+      { logger: require('pino')({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage }
+    );
+  } catch (err) {
+    console.error('Erro ao baixar mídia:', err);
+    return { error: ERRORS.PROCESS_FAIL };
+  }
 
-    if (info.type === "sticker")
-        return { error: ERRORS.STICKER_INPUT };
-
-    if (
-        info.type !== "image" &&
-        info.type !== "video"
-    )
-        return { error: ERRORS.UNSUPPORTED };
-
-    try {
-
-        const media = await downloadBuffer(sock, msg);
-
-        let result;
-
-        if (info.type === "image") {
-
-            result = await processImage(
-                media,
-                keepAspect
-            );
-
-        } else {
-
-            result = await processVideo(
-                media,
-                info.mime,
-                keepAspect
-            );
-
-        }
-
-        result.buffer = await addExif(result.buffer);
-
-        return result;
-
+  try {
+    if (info.type === 'image') return await processImage(mediaBuffer, keepAspect);
+    if (info.type === 'video' || info.type === 'image') {
+      return {
+        buffer: await videoToSticker(mediaBuffer),
+        animated: true
+      };
     }
-    catch (err) {
+  } catch (err) {
+    if (err.message === 'VIDEO_TOO_SHORT') return { error: ERRORS.VIDEO_TOO_SHORT };
+    if (err.message === 'VIDEO_TOO_LONG') return { error: ERRORS.VIDEO_TOO_LONG };
+    console.error('Erro sticker:', err);
+    return { error: ERRORS.PROCESS_FAIL };
+  }
 
-        console.error(err);
-
-        switch (err.message) {
-
-            case "VIDEO_TOO_SHORT":
-                return {
-                    error: ERRORS.VIDEO_TOO_SHORT
-                };
-
-            case "VIDEO_TOO_LONG":
-                return {
-                    error: ERRORS.VIDEO_TOO_LONG
-                };
-
-            default:
-                return {
-                    error: ERRORS.PROCESS_FAIL
-                };
-
-        }
-
-    }
-
+  return { error: ERRORS.UNSUPPORTED };
 }
+
+const STICKER_HELP = `🖼️ *Como fazer figurinhas:*
+
+*/f* — Amassa a imagem/vídeo inteiro para caber em 512×512
+   (mostra tudo, sem cortar — apenas distorce a proporção)
+
+*/f 2* — Mantém a proporção original (fundo transparente)
+   (sem distorcer, sem cortar)
+
+📸 *Fotos* — Envie ou responda com */f*
+🎬 *Vídeos* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
+🎞️ *GIFs* — Entre ${MIN_VIDEO_DURATION}s e ${MAX_VIDEO_DURATION}s
+
+_Dica: Responda qualquer mídia com /f para transformá-la em figurinha!_`;
+
+module.exports = { createSticker, STICKER_HELP, MIN_VIDEO_DURATION, MAX_VIDEO_DURATION };
