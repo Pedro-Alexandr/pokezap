@@ -80,7 +80,7 @@ function tryDelete(f) { try { fs.unlinkSync(f); } catch (_) {} }
 function buildExifBuffer() {
   const json = JSON.stringify({
     'sticker-pack-id':        'com.pokézap.bot.stickers',
-    'sticker-pack-name':      'PokéZap',
+    'sticker-pack-name':      '',
     'sticker-pack-publisher': '',
     'is-avatar-sticker':      0,
   });
